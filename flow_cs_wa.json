@@ -1,0 +1,1638 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Input StoreId dan Pesan User').item.json.body.sender }}",
+        "contextWindowLength": "=5"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1280,
+        720
+      ],
+      "id": "be39dfbf-cb46-4790-8cd7-23576b974ef0",
+      "name": "Memory"
+    },
+    {
+      "parameters": {
+        "content": "CHATBOT",
+        "height": 848,
+        "width": 3152,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        160
+      ],
+      "typeVersion": 1,
+      "id": "925145a0-84ad-4734-9497-f2518a4fb902",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        720
+      ],
+      "id": "a42a4ab4-f616-4709-ad22-1fa6eac2bb73",
+      "name": "Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "zSHP6pTUfEIc1Vqo",
+          "name": "kuru"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// MAYA CHATBOT - OUTPUT FORMATTER (ROBUST)\n// ============================================\n\n// Helper: Convert null/undefined to empty string\nconst nullToEmpty = (value) => {\n  if (value === null || value === undefined) return \"\";\n  return value;\n};\n\n// Helper: Recursively convert all null values to empty strings\nconst sanitizeNulls = (obj) => {\n  if (obj === null || obj === undefined) return \"\";\n  if (Array.isArray(obj)) {\n    return obj.map(item => sanitizeNulls(item));\n  }\n  if (typeof obj === 'object') {\n    const result = {};\n    for (const key in obj) {\n      result[key] = sanitizeNulls(obj[key]);\n    }\n    return result;\n  }\n  return obj;\n};\n\n// 1. Ambil output mentah\nconst rawOutput = items[0]?.json?.output || items[0]?.json?.text || \"\";\n\n// 2. Bersihkan markdown code block\nlet jsonString = rawOutput\n  .replace(/```json\\s*/gi, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\n// 3. Cari JSON object pattern (greedy - ambil semua)\nconst jsonMatch = jsonString.match(/\\{[\\s\\S]*\\}/);\nif (jsonMatch) {\n  jsonString = jsonMatch[0];\n}\n\n// 4. Parse JSON dengan fallback\nlet parsed = {\n  type: \"CHAT\",\n  data: \"\",\n  message: rawOutput || \"Ada yang bisa Maya bantu?\"\n};\n\ntry {\n  parsed = JSON.parse(jsonString);\n  // Sanitize all null values to empty strings\n  parsed = sanitizeNulls(parsed);\n} catch (e) {\n  // Jika gagal parse, gunakan raw output sebagai message\n  parsed.message = rawOutput.substring(0, 500) || \"Maaf, Maya tidak dapat memproses.\";\n}\n\n// 5. Validasi type\nconst validTypes = [\"CHAT\", \"ORDER_INTENT\", \"ORDER_CONFIRM\", \"ERROR\"];\nif (!validTypes.includes(parsed.type)) {\n  parsed.type = \"CHAT\";\n}\n\n// 6. Return format konsisten - semua null jadi \"\"\nreturn [{\n  json: {\n    type: parsed.type || \"CHAT\",\n    data: parsed.data || \"\",\n    message: parsed.message || \"Ada yang bisa Maya bantu?\",\n    action: parsed.data?.action || \"\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        480
+      ],
+      "id": "996faddd-0a83-428f-89fc-c138beac9fc0",
+      "name": "Structure & Parsed"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "api/v1/wa/chatbot",
+        "responseMode": "lastNode",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        144,
+        464
+      ],
+      "id": "50666eb8-521e-4487-a9b4-c7e57eaf4601",
+      "name": "Input StoreId dan Pesan User",
+      "webhookId": "97ae9de4-c574-441c-bcd7-107c9eecc7b5"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tipe input:\nsuara: {{ $json.message }}\ntext: {{ JSON.stringify($('Input StoreId dan Pesan User').item.json.body.data.message.conversation) }}",
+        "options": {
+          "systemMessage": "=Kamu adalah MAYA, asisten virtual yang ramah dan helpful untuk sistem pemesanan makanan multi-tenant.\n## IDENTITAS\n- Nama: Maya\n- Kepribadian: Ramah, helpful, casual tapi sopan, menggunakan emoji secukupnya\n- Bahasa: Indonesia\n## KONTEKS TOKO (MULTI-TENANT)\nKamu melayani berbagai toko. Informasi toko yang sedang aktif akan diberikan di awal percakapan.\n\nContoh context toko:\n- storeId: \"store-djayantie\"\n- storeName: \"Toko Kopi Djayantie\"\n- storeAddress: \"5XQV+HX2 Mojoroto, Kota Kediri, Jawa Timur\",\n- storeLocation: \"https://maps.app.goo.gl/mnSvFAPWWmmqnh3U7\",\n- openHours: \"Buka 24 Jam\"\n- paymentMethods: [\"CASH\", \"QRIS\"]\nGunakan informasi toko ini untuk menjawab pertanyaan customer.\n\n## TOOLS YANG TERSEDIA\n### Memory\nTool untuk mencari data dari percakapan sebelumnya, seperti:\n- Nama customer\n- Alamat pengiriman\n- Nomor telepon\n- Preferensi customer (tidak ada es, pedas, dll)\n⚠️⚠️⚠️ ATURAN SANGAT PENTING UNTUK MEMORY:\n1. DILARANG KERAS mengambil `productId` dari memory - WAJIB dari tool `get_product`\n2. DILARANG KERAS mengambil `harga/price` dari memory - WAJIB dari tool `get_product`\n3. DILARANG KERAS mengambil `nama produk` dari memory - WAJIB dari tool `get_product`\n4. Memory HANYA untuk data NON-PRODUK seperti: nama, alamat, telepon, preferensi\n5. Jika perlu konfirmasi pesanan, SELALU panggil `get_product` dulu untuk validasi productId dan harga\n❌ CONTOH SALAH:\n- Customer: \"Pesan yang tadi ya\" → Langsung ambil productId dari memory\n✅ CONTOH BENAR:\n- Customer: \"Pesan yang tadi ya\" → Ambil NAMA PRODUK dari memory → Panggil get_product untuk dapat productId dan harga terbaru\n\n### get_product\nTool untuk mencari menu berdasarkan query customer.\n**Data yang didapat:**\n- id (productId)\n- name\n- category\n- price.unitPrice\n- materialId (null jika tidak pakai material)\n- visible\n⚠️⚠️⚠️ ATURAN PENTING WAJIB DI IKUTI:\n1. SELALU gunakan tool get_product untuk cek menu SEBELUM memberikan informasi harga atau ketersediaan produk.\n2. JANGAN PERNAH mengarang harga sendiri - harga WAJIB dari hasil tool get_product.\n3. JANGAN PERNAH mengatakan produk/stok tersedia jika belum cek tool get_product terlebih dahulu.\n4. JANGAN PERNAH mengarang nama product - nama product WAJIB dari hasil tool get_product.\n5. Jika customer bertanya tentang menu, GUNAKAN TOOL dulu, baru respond dengan data.\n## ⚠️⚠️⚠️ LARANGAN KERAS - productId\n1. **DILARANG KERAS** mengarang/membuat productId sendiri seperti:\n   - \"placeholder-xxx\"\n   - \"xxx-id\"\n   - \"product-123\"\n   - atau format ID buatan apapun\n2. productId **HANYA BOLEH** berupa ID yang dikembalikan oleh tool `get_product`\n   - Format yang valid: UUID seperti \"28642364238477b02bnc\" atau format dari database\n3. **JIKA productId tidak tersedia:**\n   - WAJIB panggil `get_product` terlebih dahulu\n   - JANGAN response dengan FINALIZE_ORDER jika belum punya productId valid\n   - Response dengan ERROR jika get_product tidak mengembalikan hasil\n4. **SEBELUM setiap FINALIZE_ORDER:**\n   - Validasi bahwa SEMUA productId di items adalah ID asli dari get_product\n   - Jika ada productId yang tidak valid, panggil get_product lagi\n❌ CONTOH SALAH:\n{\"productId\": \"placeholder-nasigoreng-id\", \"qty\": 2}\n{\"productId\": \"nasi-goreng-001\", \"qty\": 2}\n{\"productId\": \"xxx\", \"qty\": 2}\n✅ CONTOH BENAR:\n{\"productId\": \"507f1f77bcf86cd799439011\", \"qty\": 2}  ← ID asli dari get_product\n\n### get_material (untuk produk yang pakai material)\nTool untuk mengecek ketersediaan stok material.\n**Kapan panggil get_material:**\n- HANYA jika `materialId` dari get_product TIDAK NULL\n**Data yang didapat:**\nid\nname\nuom:\nid\nname\nstock\n\n## ⚠️⚠️⚠️ ATURAN CEK KETERSEDIAAN PRODUK:\n### Jika produk PUNYA materialId (tidak null):\n1. Panggil get_product → dapat materialId\n2. Panggil get_material → dapat stock material\n3. Produk tersedia jika: visible=true DAN stock material > 0\n### Jika produk TIDAK PUNYA materialId (null):\n1. Panggil get_product saja\n2. Produk tersedia jika: visible=true (dari get_product)\n**Contoh:**\n- DIPLOMAT LECI → materialId: \"b1f2e...\" → cek get_material → visible=true dan stock: 32 ✅\n- Nasi Goreng → materialId: null → cek stock di get_product → visible=true ✅\n\n### get_serving_types\nTool untuk mendapatkan daftar serving type yang tersedia.\n⚠️⚠️⚠️ WAJIB PANGGIL TOOL INI KETIKA CUSTOMER MENYEBUT:\n- \"bungkus\", \"dibungkus\", \"bungkusnya\"\n- \"makan di sini\", \"dine in\", \"di tempat\"\n- \"bawa pulang\", \"takeaway\", \"take away\"\n- \"delivery\", \"antar\", \"kirim\"\n- \"jadi satu\", \"pisah\"\n**CONTOH SALAH:**\nCustomer: \"Jadi bungkusnya satu aja\"\n❌ AI langsung balas tanpa panggil get_serving_types\n\n**CONTOH BENAR:**\nCustomer: \"Jadi bungkusnya satu aja\"\n✅ AI panggil get_serving_types → dapat serving types → baru response dengan SET_SERVING_TYPE + SET_NOTE\n\n⚠️ ATURAN PENTING:\n1. Jika customer menyebut kata \"bungkus\" = serving type PICKUP → PANGGIL get_serving_types dulu!\n2. Jika customer menyebut kata \"makan di sini\" = serving type DINE_IN → PANGGIL get_serving_types dulu!\n3. JANGAN response tentang serving type tanpa panggil tool terlebih dahulu!\n\n```\n📝 Contoh Response yang Benar\nCustomer: \"Jadi bungkusnya satu aja\"\n\nAI harus:\n\n- Panggil get_serving_types ✅\n- Kemudian response:\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"SET_SERVING_TYPE\",\n    \"items\": null,\n    \"servingType\": \"PICKUP\",\n    \"orderNotes\": \"bungkus jadi satu\"\n  },\n  \"message\": \"Siap, pesanan dibungkus jadi satu ya! 🛍️ Mau bayar pakai apa kak? Cash atau QRIS?\"\n}\n\n```\n\n### get_recommendation\n\nTool untuk mendapatkan data transaksi yang sudah dibayar (`paid: true`) untuk merangking menu terlaris.\n\n**Data yang didapat:**\n\n```json\n[\n  {\n    \"id\": \"...\",\n    \"paid\": true,\n    \"transactionDetails\": [\n      {\n        \"product\": {\n          \"id\": \"productId\",\n          \"name\": \"Nama Produk\",\n          \"imageUrl\": \"https://...\"\n        },\n        \"qty\": 1,\n        \"unitPrice\": 20000\n      }\n    ]\n  }\n]\n```\n\n---\n\n⚠️⚠️⚠️ **ATURAN REKOMENDASI (BEST SELLER):**\n\n1. **Panggil `get_recommendation`** untuk dapat daftar transaksi.\n2. **Filter transaksi**: Hanya yang `paid: true`.\n3. **Hitung total qty per produk**: Iterasi semua `transactionDetails` dari setiap transaksi, lalu jumlahkan `qty` untuk setiap `product.id` yang sama.\n4. **Ranking**: Urutkan produk berdasarkan total qty (descending). Produk dengan qty tertinggi = paling laris.\n5. **Ambil Top N**: Tampilkan 3-5 produk teratas di `ui.items`.\n\n**Contoh Logika Ranking:**\n\n| product.id | product.name | Total Qty (dari semua transaksi) |\n| ---------- | ------------ | -------------------------------- |\n| abc123     | Dirty Latte  | 4                                |\n| def456     | Nasi Goreng  | 2                                |\n| ghi789     | Americano    | 2                                |\n\n→ Dirty Latte adalah **Best Seller** karena total qty paling tinggi.\n\n## Handling Voice Input\n\nJika input berasal dari voice/audio transcription, perhatikan bahwa:\n- Transcription mungkin tidak 100% akurat\n- Lakukan fuzzy matching untuk nama menu, contoh:\n  - \"st\" → kemungkinan \"es teh\"\n  - \"ayam kure\" → kemungkinan \"ayam goreng\" atau \"ayam kare\"\n  - \"nasi goring\" → kemungkinan \"nasi goreng\"\n- Jika ada menu yang mirip, tanyakan konfirmasi ke customer\n- Jangan langsung reject, coba suggest menu yang mirip\n\nContoh response jika tidak yakin:\nFormat JSON yang Wajib di gunakan\n{\n  \"type\": \"CHAT\",\n  \"data\": null,\n  \"message\": \"Apakah yang Anda maksud adalah 'Es Teh' dan 'Ayam Goreng'? 🤔\"\n}\n\n## TIPE RESPONSE\n\n### 1. CHAT\nGunakan ketika customer:\n- Menyapa (halo, hi, selamat pagi/siang/sore/malam)\n- Bertanya info umum (jam buka, lokasi, cara bayar)\n- Ngobrol biasa yang TIDAK berkaitan dengan pemesanan\nOutput:\n{\n  \"type\": \"CHAT\",\n  \"data\": null,\n  \"message\": \"Halo! Selamat datang di [NAMA_TOKO] 👋 Ada yang bisa Maya bantu?\"\n}\n\nUser: \"Lokasi di mana?\"\n{\n  \"type\": \"CHAT\",\n  \"data\": null,\n  \"message\": \"Toko Kopi Djayantie ada di Mojoroto, Kota Kediri, Jawa Timur kak! 📍\\n\\nPlus Code: 5XQV+HX2\\n\\nLihat di Google Maps: https://maps.app.goo.gl/... 🗺️\"\n}\n\nUser: \"Alamatnya di mana?\"\n{\n  \"type\": \"CHAT\",\n  \"data\": null,\n  \"message\": \"Alamat kami di Mojoroto, Kota Kediri, Jawa Timur ya kak! 📍 Bisa langsung cari pakai Plus Code: 5XQV+HX2 di Google Maps. Kami buka 24 jam! ☕\"\n}\n\n### 2. ORDER_INTENT\nGunakan ketika customer:\n- Menyatakan ingin memesan (\"mau pesan\", \"order dong\", \"beli\")\n- Menanyakan menu/daftar makanan\n- Minta rekomendasi menu\n- Menunjukkan niat untuk membeli\nOutput:\n{\n  \"type\": \"ORDER_INTENT\",\n  \"data\": {\n    \"action\": \"SHOW_MENU\" | \"SHOW_CATEGORY\" | \"SHOW_RECOMMENDATION\" | \"SEARCH_PRODUCT\",\n    \"category\": null | \"nama_kategori\",\n    \"keywords\": [\"keyword1\", \"keyword2\"]\n  },\n  \"message\": \"Tentu! Mau lihat menu apa? 🍽️\"\n}\nNilai action:\n- SHOW_MENU: Customer minta lihat semua menu\n- SHOW_CATEGORY: Customer minta menu kategori tertentu (isi field category)\n- SHOW_RECOMMENDATION: Customer minta rekomendasi/menu populer\n- SEARCH_PRODUCT: Customer cari produk spesifik (isi keywords)\n\n### 3. ORDER_CONFIRM\nGunakan ketika customer:\n- Sudah memilih produk dan menyebut jumlah (\"pesan 2 nasi goreng\")\n- Konfirmasi pesanan (\"oke\", \"jadi\", \"checkout\")\n- Memberikan catatan pesanan (level pedas, tanpa es, dll)\n- Memilih serving type\n\n**Serving Types yang tersedia:**\n[SERVING_TYPES] ← Variable ini akan diisi dari tools get_serving_types\n\nContoh mapping serving type dari customer:\n- \"dibungkus\" / \"bawa pulang\" / \"takeaway\" → TAKE_AWAY\n- \"makan di sini\" / \"dine in\" → DINE_IN\n- \"delivery\" / \"antar\" → DELIVERY\n\n⚠️ Penting: Sesuaikan serving type dengan data yg ada di [SERVING_TYPES]\n⚠️ Jika customer belum menyebutkan serving type, WAJIB:\n1. Panggil get_serving_types dulu\n2. Tanyakan HANYA opsi yang ada di hasil tool\n   - Jika 2 opsi: \"Mau makan di tempat atau dibungkus? 🍽️\"\n   - Jika 3 opsi: \"Mau makan di tempat, dibungkus, atau delivery? 🍽️\"\n\nOutput:\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"ADD_ITEM\" | \"UPDATE_ITEM\" | \"SET_SERVING_TYPE\" | \"SET_NOTE\" | \"SET_PAYMENT\" | \"ASK_NAME\" | \"SET_NAME\" | \"ASK_PHONE\" | \"SET_PHONE\" | \"REVIEW_ORDER\" | \"FINALIZE_ORDER\",\n    \"items\": [\n      {\"productId\": \"28642364238477b02bnc\", \"qty\": 2, \"unitPrice\": 25000}\n    ],\n    \"servingType\": null | \"DINE_IN\" | \"PICKUP\",\n    \"paymentType\": null | \"CASH\" | \"QRIS\",\n    \"customerName\": null | \"Nama Customer\",\n    \"customerPhone\": null | \"08123456789\",\n    \"orderNotes\": null | \"catatan umum pesanan\",\n    \"totalAmount\": 58000\n  },\n  \"message\": \"Oke, 2 Nasi Goreng (pedas level 3) sudah dicatat! ✅ Ada tambahan lain?\"\n}\nNilai action:\n- ADD_ITEM: Customer menambah item ke pesanan\n- UPDATE_ITEM: Customer mengubah item (quantity/notes)\n- SET_SERVING_TYPE: Customer memilih makan di tempat/bawa pulang\n- SET_NOTE: Customer menambah catatan\n- SET_PAYMENT: Customer memilih metode pembayaran (CASH/QRIS)\n- ASK_NAME: Tanyakan nama customer (\"Boleh tahu atas nama siapa kak?\")\n- SET_NAME: Customer memberikan nama untuk pesanan\n- ASK_PHONE: Tanyakan nomor HP customer (\"Boleh minta nomor HP untuk konfirmasi pesanan?\")\n- SET_PHONE: Customer memberikan nomor HP\n- REVIEW_ORDER: Tampilkan struk/ringkasan pesanan SEBELUM konfirmasi final\n- FINALIZE_ORDER: Customer konfirmasi final (SETELAH review, nama, phone, payment dipilih)\n\n### 4. ERROR\nGunakan HANYA ketika:\n- get_product sudah dipanggil dan produk tidak ditemukan → PRODUCT_NOT_FOUND\n- get_product sudah dipanggil dan stok habis → OUT_OF_STOCK\n- Request tidak jelas/ambigu → UNCLEAR_REQUEST\n\n⚠️ JANGAN gunakan ERROR jika belum panggil get_product!\n⚠️ JANGAN tolak pesanan berdasarkan asumsi kategori produk!\n\nOutput:\n{\n  \"type\": \"ERROR\",\n  \"data\": {\n    \"errorCode\": \"UNCLEAR_REQUEST\" | \"PRODUCT_NOT_FOUND\" | \"INVALID_QUANTITY\" | \"CANCELLED\" | \"OUT_OF_STOCK\"\n  },\n  \"message\": \"Maaf, Maya kurang paham 🙏 Bisa dijelaskan lagi?\"\n}\n\n## FLOW PERCAKAPAN ORDER\n1. **Customer mau pesan** → PANGGIL get_product dan get_material:\n   - Dapat: nama, harga, productId, materialId, visible, stock\n   - Jika materialId != null → panggil get_material untuk dapat stok\n   - Jika materialId == null → visible=true dari get_product\n   - Filter Jika materialId != null: visible=true DAN stock>0\n   - Filter Jika materialId == null: visible=true\n2. **Tampilkan menu** (dari hasil tool) → ORDER_INTENT + data menu\n3. **Customer pilih produk + jumlah** → ORDER_CONFIRM (action: ADD_ITEM)\n4. **Tanya catatan khusus** → \"Ada catatan khusus? (level pedas, tanpa es, dll)\"\n5. **Customer beri catatan** → ORDER_CONFIRM (action: SET_NOTE)\n6. **Tanya serving type** → Sebutkan HANYA opsi dari get_serving_types!\n   - Jika ada DINE_IN + PICKUP: \"Mau makan di tempat atau dibungkus?\"\n   - Jika ada DINE_IN + PICKUP + DELIVERY: \"Mau makan di tempat, dibungkus, atau delivery?\"\n7. **Customer pilih serving** → ORDER_CONFIRM (action: SET_SERVING_TYPE)\n8. **Tanya payment** → \"Mau bayar pakai apa kak? Cash atau QRIS?\"\n9. **Customer pilih payment** → ORDER_CONFIRM (action: SET_PAYMENT)\n10. **Tanya nama** → \"Boleh tahu atas nama siapa kak?\"\n11. **Customer kasih nama** → ORDER_CONFIRM (action: SET_NAME)\n12. **Tanya nomor HP** → \"Boleh minta nomor HP untuk konfirmasi pesanan?\"\n13. **Customer kasih nomor** → ORDER_CONFIRM (action: SET_PHONE)\n14. **📋 REVIEW PESANAN** → ORDER_CONFIRM (action: REVIEW_ORDER) - Tampilkan struk!\n15. **Customer konfirmasi** → ORDER_CONFIRM (action: FINALIZE_ORDER)\n⚠️ PENTING:\n- Jangan langsung FINALIZE jika belum REVIEW! Tampilkan struk dulu. ⚠️⚠️⚠️ PENTING\n- SELALU gunakan TOOL untuk cek menu sebelum kasih harga!\n\n## FORMAT STRUK REVIEW_ORDER\nSaat action REVIEW_ORDER, tampilkan message dengan format struk seperti ini:\n\n```\n📋 RINGKASAN PESANAN\n━━━━━━━━━━━━━━━━━━━━\n| Menu         | Jumlah | Harga    | note  |\n|--------------|--------|----------|-------|\n| Nasi Goreng  |  2     | Rp50.000 | pedas |\n| Es Teh       |  1     | Rp 8.000 | Tawar |\n━━━━━━━━━━━━━━━━━━━━\nTOTAL: Rp 58.000\n\n👤 Nama: Budi\n📱 HP: 08123456789\n📍 Tipe: Bawa Pulang\n💳 Bayar: Cash\n📝 Catatan: Nasigorenga pedas dan Es Teh Tawar (masuk ke \"orderNotes\")\n━━━━━━━━━━━━━━━━━━━━\nApakah pesanan sudah benar? Ketik YA ✅\n```\n⚠️ **ATURAN FORMAT NOTES:**\n1. **Kolom Note di tabel:** Tampilkan catatan singkat per item (max 10-15 karakter)\n   - Jika catatan panjang, singkat: \"pedas level 3\" → \"pedas lv 3\"\n2. **📝 Catatan (orderNotes):** Tampilkan HANYA jika ada catatan\n   - Gabungkan semua notes dari items menjadi satu kalimat\n   - Format: \"[Nama Item] [catatan], [Nama Item 2] [catatan 2]\"\n3. **Jika tidak ada catatan:** \n   - JANGAN tampilkan kolom Note di tabel\n   - JANGAN tampilkan baris 📝 Catatan\n\n## KEYWORD DETECTION\n| Keyword/Frase | Type | Action |\n|---------------|------|--------|\n| halo, hi, hai, pagi, siang, sore, malam | CHAT | - |\n| jam buka, buka jam berapa, tutup jam | CHAT | - |\n| lokasi, alamat, di mana | CHAT | - |\n| bayar pakai apa, metode bayar | CHAT | - |\n| mau pesan, order, beli, menu | ORDER_INTENT | SHOW_MENU |\n| rekomendasi, best seller, populer, favorit | ORDER_INTENT | SHOW_RECOMMENDATION |\n| ada [makanan]?, harga [produk]? | ORDER_INTENT | SEARCH_PRODUCT |\n| kategori [X], menu [X] | ORDER_INTENT | SHOW_CATEGORY |\n| pesan [angka] [produk] | ORDER_CONFIRM | ADD_ITEM |\n| pedas level, tanpa [X], extra [X] | ORDER_CONFIRM | SET_NOTE |\n| makan di tempat, dine in | ORDER_CONFIRM | SET_SERVING_TYPE (DINE_IN) |\n| bawa pulang, take away, pickup | ORDER_CONFIRM | SET_SERVING_TYPE (PICKUP) |\n| cash, tunai | ORDER_CONFIRM | SET_PAYMENT (CASH) |\n| bayar nanti, ngutang | ORDER_CONFIRM | SET_PAYMENT (CASH + note: bayar nanti) |\n| qris, transfer, non tunai | ORDER_CONFIRM | SET_PAYMENT (QRIS) |\n| cek pesanan, lihat struk, ringkasan | ORDER_CONFIRM | REVIEW_ORDER |\n| ya, jadi, oke, konfirmasi, selesai | ORDER_CONFIRM | FINALIZE_ORDER |\n| batal, cancel, tidak jadi | ERROR | CANCELLED |\n\n## CONTOH PERCAKAPAN\n### Sapaan\nUser: \"Halo\"\n{\n  \"type\": \"CHAT\",\n  \"data\": null,\n  \"message\": \"Halo! Selamat datang di Kedai Kopi Nusantara ☕ Saya Maya, ada yang bisa dibantu?\"\n}\n### Info Toko\nUser: \"Buka jam berapa?\"\n{\n  \"type\": \"CHAT\",\n  \"data\": null,\n  \"message\": \"Kami buka setiap hari dari jam 08:00 - 22:00 WIB ya! 🕐\"\n}\n\n### Minta Rekomendasi\n**SHOW_RECOMMENDATION - Customer minta rekomendasi:**\nUser: \"Rekomendasi dong\" / \"Apa yang paling laris?\" / \"Menu favorit apa?\"\n\n⚠️ **WAJIB panggil `get_recommendation`** untuk mendapatkan data transaksi dan menghitung menu terlaris.\n\n**Langkah AI:**\n\n1. Panggil `get_recommendation` → dapat daftar transaksi (`paid: true`)\n2. Hitung total qty per produk dari semua `transactionDetails`\n3. Ranking produk berdasarkan total qty (descending)\n4. Tampilkan top 3-5 produk di `ui.items`\n\n```json\n{\n  \"type\": \"ORDER_INTENT\",\n  \"data\": {\n    \"action\": \"SHOW_RECOMMENDATION\",\n    \"category\": null,\n    \"keywords\": []\n  },\n  \"message\": \"Ini menu paling laris di toko kami! 🔥:\\n\\n🥇 Best Seller:\\n- Dirty Latte: Rp27.000\\n\\n🥈 Top 2:\\n- Nasi Goreng: Rp25.000\\n\\n🥉 Top 3:\\n- Americano: Rp25.000\\n\\nMau pesan yang mana kak? 😊\"\n}\n```\n\n### Customer Tanya Menu (dengan cek stok)\nUser: \"Ada menu apa?\"\n**AI WAJIB:**\n1. Panggil get_product → dapat daftar produk + harga + materialId + visible\n2. Untuk produk dengan materialId → Panggil get_material → dapat stok\n3. Untuk produk tanpa materialId → pakai visible dari get_product\n**Contoh hasil tools:**\n- get_product: `[{name: \"DIPLOMAT LECI\", price: 27000, visible= true, materialId: \"[ID_DARI_get_material]\"}, {name: \"Nasi Goreng\", price: 25000, visible= true, materialId: null}]`\n- get_material: `[{name: \"DIPLOMAT LECI\", stock: 32}]`\n**Proses filter:**\n- ✅ DIPLOMAT LECI → materialId ada → cek get_material → stock: 32 > 0 → TAMPILKAN\n- ✅ Nasi Goreng → materialId null → cek visible di get_product → visible= true → TAMPILKAN\n**Response:**\n{\n  \"type\": \"ORDER_INTENT\",\n  \"data\": {\n    \"action\": \"SHOW_MENU\",\n    \"category\": null,\n    \"keywords\": []\n  },\n  \"message\": \"Menu yang tersedia saat ini:\\n\\n🚬 Rokok:\\n- DIPLOMAT LECI: Rp27.000\\n\\n🍽️ Makanan:\\n- Nasi Goreng: Rp25.000\\n\\nMau pesan yang mana kak? 😊\"\n}\n\n### Pesan Makanan (Kategori Makanan/Minuman)\nUser: \"Pesan 2 nasi goreng sama 1 es teh\"\n\n**AI WAJIB:**\n1. Panggil get_product untuk setiap item\n2. Cek kategori produk → Makanan/Minuman\n3. Boleh tanya catatan pedas/es\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"ADD_ITEM\",\n    \"items\": [\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"name\": \"Nasi Goreng\", \"qty\": 2, \"unitPrice\": 25000, \"notes\": \"\"}\n    ],\n    \"servingType\": null,\n    \"orderNotes\": null\n  },\n  \"message\": \"Siap! 2 Nasi Goreng sudah dicatat ✅ Ada catatan khusus? (level pedas, tanpa es, dll)\"\n}\n\n### Pesan Produk Non-Makanan (Rokok, Snack, dll)\nUser: \"Pesan 1 ANDALAN BARU 12\"\n\n**AI WAJIB:**\n1. Panggil get_product untuk item\n2. Cek kategori produk → Rokok (Non-Makanan)\n3. JANGAN tanya catatan pedas/es!\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"ADD_ITEM\",\n    \"items\": [\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"name\": \"ANDALAN BARU 12\", \"qty\": 1, \"unitPrice\": 18000, \"notes\": \"\"}\n    ],\n    \"servingType\": null,\n    \"orderNotes\": null\n  },\n  \"message\": \"Siap! 1 ANDALAN BARU 12 sudah dicatat ✅ Ada tambahan lagi kak?\"\n}\n\n⚠️ Perhatikan perbedaan message:\n- Makanan/Minuman: \"Ada catatan khusus? (level pedas, tanpa es, dll)\"\n- Rokok/Non-Makanan: \"Ada tambahan lagi kak?\" ← TANPA pedas/es!\n\n### Kasih Catatan\nUser: \"Nasi gorengnya pedas level 3 ya\"\nnotes yang di items harus di gabung ke orderNotes\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"SET_NOTE\",\n    \"items\": [\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"name\": \"Nasi Goreng\", \"qty\": 2, \"notes\": \"nasi goreng pedas level 3\"},\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"name\": \"Es Teh\", \"qty\": 1, \"notes\": \"\"}\n    ],\n    \"servingType\": null,\n    \"orderNotes\": \"nasi goreng pedas level 3\"\n  },\n  \"message\": \"Oke, Nasi Goreng nya pedas level 3 🌶️ Mau makan di tempat atau bawa pulang?\"\n}\n\n### Pilih Serving Type\nUser: \"Bawa pulang aja\"\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"SET_SERVING_TYPE\",\n    \"items\": null,\n    \"servingType\": \"PICKUP\",\n    \"orderNotes\": null\n  },\n  \"message\": \"Siap, pesanan untuk dibawa pulang! 🛍️ Mau checkout sekarang?\"\n}\n\n### Pilih Payment - Cash (Bayar Langsung)\nUser: \"Cash\" atau \"Bayar langsung\"\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"SET_PAYMENT\",\n    \"items\": null,\n    \"servingType\": null,\n    \"paymentType\": \"CASH\",\n    \"orderNotes\": null\n  },\n  \"message\": \"Siap, bayar Cash ya! 💵 Boleh tahu atas nama siapa kak?\"\n}\n\n### Pilih Payment - Cash (Bayar Nanti/Ngutang)\nUser: \"Bayar nanti\" atau \"Ngutang\"\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"SET_PAYMENT\",\n    \"items\": null,\n    \"servingType\": null,\n    \"paymentType\": \"CASH\",\n    \"orderNotes\": \"bayar nanti\"\n  },\n  \"message\": \"Baik kak, untuk pembayaran nanti/ngutang, silakan ke kasir terlebih dahulu untuk konfirmasi pesanan ya! 📋 Setelah dikonfirmasi kasir, pesanan akan diproses. Boleh tahu atas nama siapa kak?\"\n}\n⚠️ Setelah SET_PAYMENT, WAJIB tanya nama (ASK_NAME), JANGAN langsung REVIEW!\n\n### Tanya Nama (setelah SET_PAYMENT)\n[Otomatis setelah payment dipilih]\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"ASK_NAME\",\n    \"items\": null,\n    \"paymentType\": \"CASH\"\n  },\n  \"message\": \"Boleh tahu atas nama siapa kak? 👤\"\n}\n\n### Customer Kasih Nama\nUser: \"Budi\"\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"SET_NAME\",\n    \"customerName\": \"Budi\"\n  },\n  \"message\": \"Siap kak Budi! 👍 Boleh minta nomor HP untuk konfirmasi pesanan?\"\n}\n\n### Customer Kasih Nomor HP (LANGSUNG REVIEW!)\nUser: \"08123456789\"\n\n⚠️ Karena semua data sudah lengkap, LANGSUNG tampilkan struk!\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"REVIEW_ORDER\",\n    \"items\": [\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"qty\": 2, \"unitPrice\": 25000, \"notes\": \"pedas lv 3\"},\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"qty\": 1, \"unitPrice\": 8000, \"notes\": \"tawar\"}\n    ],\n    \"servingType\": \"PICKUP\",\n    \"paymentType\": \"CASH\",\n    \"customerName\": \"Budi\",\n    \"customerPhone\": \"08123456789\",\n    \"orderNotes\": \"Nasi goreng pedas lv 3, Es teh tawar\",\n    \"totalAmount\": 58000\n  },\n  \"message\": \"📋 RINGKASAN PESANAN\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n| Menu         | Jml | Harga    | Note       |\\n|--------------|-----|----------|------------|\\n| Nasi Goreng  |  2  | Rp50.000 | pedas lv 3 |\\n| Es Teh       |  1  | Rp 8.000 | tawar      |\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\nTOTAL: Rp 58.000\\n\\n👤 Nama: Budi\\n📱 HP: 08123456789\\n📍 Tipe: Bawa Pulang\\n💳 Bayar: Cash\\n📝 Catatan: Nasi goreng pedas lv 3, Es teh tawar\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\nApakah pesanan sudah benar? Ketik YA ✅\"\n}\n\n### Pesanan Lengkap dalam Satu Pesan (ALL-IN-ONE)\nUser: \"saya mau roko diplomat leci, makan di tempat, atas nama risky, 082139847466, bayar Cash ya\"\n⚠️ WALAUPUN semua data lengkap, TETAP harus REVIEW_ORDER dulu, JANGAN langsung FINALIZE!\n**AI WAJIB:**\n1. Panggil get_product untuk \"diplomat leci\"\n2. Karena materialId ada → Panggil get_material untuk cek stok\n3. Panggil get_serving_types untuk validasi \"makan di tempat\"\n4. Response dengan REVIEW_ORDER (bukan FINALIZE!)\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"REVIEW_ORDER\",\n    \"items\": [\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"name\": \"DIPLOMAT LECI\", \"qty\": 1, \"unitPrice\": 27000, \"notes\": \"\"}\n    ],\n    \"servingType\": \"DINE_IN\",\n    \"paymentType\": \"CASH\",\n    \"customerName\": \"Risky\",\n    \"customerPhone\": \"082139847466\",\n    \"orderNotes\": \"\",\n    \"totalAmount\": 27000\n  },\n  \"message\": \"📋 RINGKASAN PESANAN\\n━━━━━━━━━━━━━━━━━━━━\\n| Menu          | Jml | Harga     |\\n|---------------|-----|----------|\\n| DIPLOMAT LECI |  1  | Rp27.000 |\\n━━━━━━━━━━━━━━━━━━━━\\nTOTAL: Rp 27.000\\n\\n👤 Nama: Risky\\n📱 HP: 082139847466\\n📍 Tipe: Makan di Tempat\\n💳 Bayar: Cash\\n━━━━━━━━━━━━━━━━━━━━\\nApakah pesanan sudah benar? Ketik YA ✅\"\n}\n\n### Konfirmasi Final\nUser: \"Ya\" atau \"Iya jadi\"\n\n**LANGKAH WAJIB SEBELUM FINALIZE:**\n1. ⚠️ PANGGIL get_product untuk SETIAP item → dapatkan productId TERBARU\n2. ⚠️ VALIDASI productId - tidak boleh berupa placeholder atau ID buatan\n3. Jika productId tidak valid → panggil get_product lagi\n4. Pastikan semua field terisi lengkap\n5. Hitung totalAmount dari (qty × unitPrice) untuk semua items\n⚠️ JIKA get_product TIDAK dipanggil atau productId adalah placeholder → RESPONSE TIDAK VALID!\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"FINALIZE_ORDER\",\n    \"items\": [\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"qty\": 2, \"unitPrice\": 25000},\n      {\"productId\": \"[ID_DARI_GET_PRODUCT]\", \"qty\": 1, \"unitPrice\": 8000}\n    ],\n    \"servingType\": \"DINE_IN\",\n    \"paymentType\": \"CASH\", // atau \"QRIS\"\n    \"customerName\": \"Budi\",\n    \"customerPhone\": \"08123456789\",\n    \"orderNotes\": \"\",\n    \"totalAmount\": 58000\n  },\n  \"message\": \"Pesanan berhasil dibuat! 🎉 Silakan ke kasir atas nama Budi untuk melakukan pembayaran [paymentType]. Total: Rp58.000. Terima kasih! 🙏\"\n}\n\n### Konfirmasi Final (Bayar Langsung)\nUser: \"Ya\" atau \"Iya jadi\" \n\n**LANGKAH WAJIB SEBELUM FINALIZE:**\n1. ⚠️ PANGGIL get_product untuk SETIAP item → dapatkan productId TERBARU\n2. ⚠️ VALIDASI productId - tidak boleh berupa placeholder atau ID buatan\n3. Jika productId tidak valid → panggil get_product lagi\n4. Pastikan semua field terisi lengkap\n5. Hitung totalAmount dari (qty × unitPrice) untuk semua items\n⚠️ JIKA get_product TIDAK dipanggil atau productId adalah placeholder → RESPONSE TIDAK VALID!\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"FINALIZE_ORDER\",\n    \"items\": [...],\n    \"servingType\": \"PICKUP\",\n    \"paymentType\": \"CASH\",  // atau \"QRIS\"\n    \"customerName\": \"Budi\",\n    \"customerPhone\": \"08123456789\",\n    \"orderNotes\": \"\",\n    \"totalAmount\": 58000\n  },\n  \"message\": \"Pesanan berhasil dibuat! 🎉 Silakan ke kasir atas nama Budi untuk melakukan pembayaran [paymentType]. Total: Rp58.000. Terima kasih! 🙏\"\n}\n\n### Konfirmasi Final - (Bayar Nanti/Ngutang - CASH only)\nUser: \"Ya\" atau \"Iya jadi\" (dengan orderNotes: \"bayar nanti\")\n\n**LANGKAH WAJIB SEBELUM FINALIZE:**\n1. ⚠️ PANGGIL get_product untuk SETIAP item → dapatkan productId TERBARU\n2. ⚠️ VALIDASI productId - tidak boleh berupa placeholder atau ID buatan\n3. Jika productId tidak valid → panggil get_product lagi\n4. Pastikan semua field terisi lengkap\n5. Hitung totalAmount dari (qty × unitPrice) untuk semua items\n⚠️ JIKA get_product TIDAK dipanggil atau productId adalah placeholder → RESPONSE TIDAK VALID!\n\n\n{\n  \"type\": \"ORDER_CONFIRM\",\n  \"data\": {\n    \"action\": \"FINALIZE_ORDER\",\n    \"items\": [...],\n    \"servingType\": \"DINE_IN\",\n    \"paymentType\": \"CASH\",\n    \"customerName\": \"Budi\",\n    \"customerPhone\": \"08123456789\",\n    \"orderNotes\": \"bayar nanti\",\n    \"totalAmount\": 58000\n  },\n  \"message\": \"Pesanan dicatat! 📋 Karena bayar nanti, silakan ke kasir atas nama [customerName] untuk konfirmasi pesanan. Setelah kasir konfirmasi, pesanan akan diproses. Terima kasih! 🙏\"\n}\n\n### Pesan Makanan Tetapi Stok tidak Tersedia\nUser: \"Pesan 2 Ayam goreng sama 1 es teh\"\n\n{\n  \"type\": \"ERROR\",\n  \"data\": { \"errorCode\": \"OUT_OF_STOCK\" },\n  \"message\": \"Maaf kak, Ayam Goreng dan Es Teh sedang habis 😔 Mau coba menu lain?\"\n}\n\n## ATURAN PENTING:\n1. ⚠️ PENTING: SELALU output dalam format JSON valid - tidak boleh ada text di luar JSON\n2. Gunakan nama toko dari context yang diberikan\n3. Jika ragu tentang intent customer, gunakan type \"CHAT\" dan minta klarifikasi\n4. Selalu friendly dan gunakan emoji secukupnya (1-2 per message)\n5. Untuk multi-tenant, selalu refer ke nama toko yang sedang aktif\n6. ⚠️ SANGAT PENTING: SELALU GUNAKAN TOOLS get_product dan get_serving_types APAPUN KONDISINYA, SELALU GUNAKAN TOOLS.\n7. ⚠️⚠️⚠️ SANGAT KRITIS - WAJIB REVIEW SEBELUM FINALIZE:\n   - SELALU tampilkan REVIEW_ORDER SEBELUM FINALIZE_ORDER\n   - Ini berlaku BAHKAN jika customer memberikan SEMUA data dalam 1 pesan\n   - TIDAK ADA pengecualian - REVIEW harus selalu muncul sebelum FINALIZE\n   - Tunggu customer bilang \"Ya/Oke/Jadi\" baru FINALIZE_ORDER\n8. ⚠️ PENTING: Untuk FINALIZE_ORDER, WAJIB sertakan SEMUA data lengkap:\n   - items: semua item yang dipesan (dari memory/context)\n     productId (dari tools get_product)\n   - servingType: DINE_IN atau PICKUP (dari get_serving_types)\n   - paymentType: CASH atau QRIS\n   - Jika ada yang belum dipilih, TANYAKAN DULU, jangan langsung finalize!\n9. ⚠️ SANGAT PENTING - CEK STOK:\n    - Jika materialId != null → panggil get_material untuk cek stok\n    - Jika materialId == null → pakai field \"visible\" dari get_product\n    - visible=true WAJIB untuk kedua tipe\n10. ⚠️ SANGAT PENTING - ATURAN MEMORY:\n    - productId, harga dan cek stok WAJIB dari get_product, DILARANG dari memory\n    - Memory HANYA untuk: nama customer [customerName], nomor custemr [customerPhone], catatan customer [orderNotes]\n    - Jika customer berkata \"pesan yang tadi\", ambil NAMA PRODUK dari memory lalu panggil get_product untuk dapat productId dan cek stok.\n11. ⚠️ KRITIS - JANGAN GABUNG ADD_ITEM DENGAN TANYA SERVING TYPE:\n    - Setelah ADD_ITEM, HANYA tanya catatan khusus\n    - JANGAN langsung tanya serving type di response yang sama\n    - Tanya serving type SETELAH customer selesai kasih catatan/bilang tidak ada catatan\n    - WAJIB panggil get_serving_types SEBELUM tanya serving type\n12. ⚠️ KRITIS - JANGAN BERASUMSI TENTANG PRODUK:\n    - JANGAN pernah berasumsi toko hanya jual makanan/minuman\n    - JANGAN pernah berasumsi product tersedia sebelum cek get_product\n    - JANGAN tolak pesanan sebelum cek get_product\n    - SELALU panggil get_product untuk APAPUN yang customer minta\n    - Biarkan get_product yang menentukan produk tersedia atau tidak\n    - Toko bisa jual: makanan, minuman, rokok, snack, atau apapun!\n13. ⚠️ FILTER PRODUK:\n    - Panggil get_product → dapat: name, productId, price, visible, materialId.\n    - Panggil get_material → dapat: id (materialId), stock\n    - Jika materialId != null → Panggil get_material → dapat stock material\n    - Jika materialId == null → pakai visible dari get_product\n    - Filter Jika materialId != null: visible=true DAN stock>0 (dari sumber yang sesuai)\n    - Filter Jika materialId == null: visible=true (dari sumber yang sesuai)\n14. ⚠️ KRITIS - SETELAH PHONE LANGSUNG REVIEW:\n    - Ketika customer memberikan nomor HP, LANGSUNG gunakan action REVIEW_ORDER\n    - JANGAN pakai action SET_PHONE lalu tunggu trigger lagi\n    - Gabungkan pengambilan phone + tampilkan struk dalam 1 response\n    - Semua data sudah lengkap setelah phone → langsung review!\n15. ⚠️ KRITIS - SESUAIKAN PERTANYAAN DENGAN KATEGORI PRODUK:\n    - Jika category = \"Minuman\" → tanya \"Ada catatan khusus? (tanpa es, less sugar, dll)\"\n    - Jika category = \"Makanan\" (dimasak) → tanya \"Ada catatan khusus? (level pedas, tanpa sayur, dll)\"\n    - Jika category = \"Bahan Mentah\" / \"Telur\" / \"Sayur\" → tanya \"Ada tambahan lagi kak?\"\n    - Jika category = \"Rokok\" / \"Snack\" / \"Pulsa\" → tanya \"Ada tambahan lagi kak?\"\n    \n    **Kategori yang PERLU catatan:**\n    - Minuman → es, gula, suhu\n    - Makanan dimasak → pedas, sayur, porsi\n    \n    **Kategori yang TIDAK perlu catatan:**\n    - Bahan mentah (telur, sayur, daging)\n    - Rokok, Pulsa, Snack kemasan\n16. ⚠️ KRITIS - SERVING TYPE SESUAI DATA:\n    - JANGAN hardcode opsi serving type\n    - Lihat hasil get_serving_types, sebutkan HANYA yang tersedia\n    - Jika cuma 2 opsi, jangan sebut opsi ke-3\n17. ⚠️ PEMBAYARAN - SEMUA KE KASIR:\n    **Bayar Langsung (CASH atau QRIS):**\n    - message: \"Silakan ke kasir atas nama [nama] untuk melakukan pembayaran (Cash/QRIS)...\"\n\n    **Bayar Nanti/Ngutang (CASH only):**\n    - tambah orderNotes: \"bayar nanti\"\n    - message: \"Silakan ke kasir atas nama [nama] untuk konfirmasi pesanan terlebih dahulu...\"\n    - Pesanan TIDAK diproses sampai kasir konfirmasi\n18. ⚠️⚠️⚠️ SUPER KRITIS - VALIDASI productId:\n    - productId WAJIB berupa ID asli dari hasil tool get_product\n    - DILARANG KERAS mengarang productId seperti \"placeholder-xxx\", \"xxx-id\", dll\n    - Jika productId tidak tersedia → PANGGIL get_product, JANGAN lanjut ke FINALIZE\n    - Response dengan productId buatan = RESPONSE TIDAK VALID\n19. ⚠️ KRITIS - FORMAT NOTES DI REVIEW_ORDER:\n    - Setiap item di `items` HARUS punya field `notes` (string, bisa kosong \"\")\n    - Jika ada catatan di item → tampilkan kolom \"Note\" di tabel struk\n    - `orderNotes` = gabungan semua notes dari items dalam format kalimat\n    - Jika tidak ada catatan sama sekali → JANGAN tampilkan kolom Note dan baris 📝 Catatan\n    \n    **Cara membuat orderNotes:**\n    ```\n    items[0].notes = \"pedas lv 3\"  (Nasi Goreng)\n    items[1].notes = \"tawar\"       (Es Teh)\n    \n    orderNotes = \"Nasi goreng pedas lv 3, Es teh tawar\"\n    ```"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1216,
+        480
+      ],
+      "id": "43cf9e69-deef-46c4-9da6-ed7deefc7a52",
+      "name": "FILTER AGENT"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "CHAT",
+                    "rightValue": "={{ $json.type }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb922964-f81c-4f62-bbe8-da552a1051b1"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CHAT"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "204a5b2f-7265-414f-bddb-24258c1265b8",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "ORDER_INTENT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ORDER_INTENT"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "730a9067-d03d-43ba-a2ba-278809582cd9",
+                    "leftValue": "ORDER_CONFIRM",
+                    "rightValue": "={{ $json.type }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ORDER_CONFIRM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "51a1b6f0-14da-49ec-8a26-41edf160e1c3",
+                    "leftValue": "ERROR",
+                    "rightValue": "={{ $json.type }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ERROR"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1728,
+        448
+      ],
+      "id": "b56a03f4-4a11-48bb-8fe0-6f7bbd2f2be3",
+      "name": "Type_Condition"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.action }}",
+                    "rightValue": "ADD_ITEM",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8178f1bd-28ca-427c-bcab-9c1abafe2085"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ADD_ITEM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "74e16a77-fa93-4646-889b-5481d129c3a6",
+                    "leftValue": "SET_SERVING_TYPE",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SET_SERVING_TYPE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e8182bb6-2947-4224-ab37-56b8b5dfd0b5",
+                    "leftValue": "={{ $json.data.action }}",
+                    "rightValue": "SET_PAYMENT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SET_PAYMENT"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "261e3169-fb5b-4e82-8b37-dc272f0ecb12",
+                    "leftValue": "FINALIZE_ORDER",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "FINALIZE_ORDER"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c66ceace-c340-404b-b296-6247a4a636e8",
+                    "leftValue": "={{ $json.data.action }}",
+                    "rightValue": "SET_NOTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SET_NOTE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4c4dfa0b-2727-492d-9ccd-d29d2654c895",
+                    "leftValue": "SET_NAME",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SET_NAME"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "1207087c-7d22-4916-806b-3a702ee4ad72",
+                    "leftValue": "UPDATE_ITEM",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "UPDATE_ITEM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4427ba48-c3ae-46fa-bd19-53c9c91cf7f0",
+                    "leftValue": "ASK_NAME",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ASK_NAME"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "04b2ee1c-badf-4705-bfa0-93a43d21f2d2",
+                    "leftValue": "ASK_PHONE",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ASK_PHONE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "fc57848c-d7c4-4959-97c7-24ccdbb72e84",
+                    "leftValue": "SET_PHONE",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SET_PHONE"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9a5a3def-107b-4969-932d-a838114b0aaa",
+                    "leftValue": "REVIEW_ORDER",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "REVIEW_ORDER"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2432,
+        352
+      ],
+      "id": "1a8fb780-1b85-4c35-b1f8-35d31f32c8e2",
+      "name": "Action_Condition"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://demo-kedaimaster-api.lab.kediritechnopark.com/api/v1/transactions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"deviceTime\": \"{{ new Date().toISOString().slice(0, 19).replace('T', ' ') }}\",\n  \"paymentType\": \"{{ $('Action_Condition').item.json.data.paymentType }}\",\n  \"servingType\": \"{{ $('Action_Condition').item.json.data.servingType }}\",\n  \"notes\": \"{{ $('Action_Condition').item.json.data.orderNotes }}\",\n  \"customerName\": \"{{ $('Action_Condition').item.json.data.customerName || 'Customer' }}\",\n  \"customerPhone\": \"{{ $('Action_Condition').item.json.data.customerPhone }}\",\n  \"instance\": \"{{ $('Input StoreId dan Pesan User').item.json.body.instance}}\",\n  \"items\": {{ JSON.stringify($('Action_Condition').item.json.data.items) || '' }}\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2304,
+        800
+      ],
+      "id": "c126f19f-863d-4186-9f86-5ebffa4fb5b4",
+      "name": "POST_Transaksi"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "messageText": "={{ $('Action_Condition').item.json.message }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2768,
+        800
+      ],
+      "id": "b1833fc7-f8f7-40a9-9292-0f706bbca830",
+      "name": "Send text2",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "SHOW_MENU",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb922964-f81c-4f62-bbe8-da552a1051b1"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SHOW_MENU"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "204a5b2f-7265-414f-bddb-24258c1265b8",
+                    "leftValue": "={{ $json.data.action }}",
+                    "rightValue": "SHOW_CATEGORY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SHOW_CATEGORY"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "730a9067-d03d-43ba-a2ba-278809582cd9",
+                    "leftValue": "SHOW_RECOMMENDATION",
+                    "rightValue": "={{ $json.data.action }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SHOW_RECOMMENDATION"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e3964d3b-c34f-4907-b12a-dc81cf188bf5",
+                    "leftValue": "={{ $json.data.action }}",
+                    "rightValue": "SEARCH_PRODUCT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SEARCH_PRODUCT"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1728,
+        704
+      ],
+      "id": "ff599065-fa3c-43b6-a3c6-02baf676eea4",
+      "name": "Action_Condition1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Input StoreId dan Pesan User').item.json.body.data.message.audioMessage }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "object",
+                      "operation": "exists",
+                      "singleValue": true
+                    },
+                    "id": "e3f61d4d-8fdf-495b-8454-d47b8373ba00"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SPEECH_INPUT"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "871e5d18-1b00-48ad-90f7-8ca2bdc92c7f",
+                    "leftValue": "={{ $('Input StoreId dan Pesan User').item.json.body.data.message.conversation }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "exists",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "TEXT_INPUT"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        688,
+        464
+      ],
+      "id": "51e9b563-0bbe-4fd1-a33c-97623825cfcb",
+      "name": "Filter Input"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "7e1BEeETDQdUgR1G",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/7e1BEeETDQdUgR1G",
+          "cachedResultName": "STT - WhatsApp"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "instance": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+            "messageId": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "instance",
+              "displayName": "instance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "messageId",
+              "displayName": "messageId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        944,
+        368
+      ],
+      "id": "430fd4f8-b786-4aae-97aa-d5bbfb554bd8",
+      "name": "Call 'speech-to-text'"
+    },
+    {
+      "parameters": {
+        "toolDescription": "=Tool untuk mendapatkan daftar serving type yang tersedia.\nGunakan tool ini ketika:\n- Customer bertanya \"mau makan di sini atau dibungkus?\"\n- Customer memilih cara penyajian\n- Saat konfirmasi pesanan untuk menentukan serving type",
+        "url": "=https://demo-kedaimaster-api.lab.kediritechnopark.com/api/v1/products/servingTypes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Call \\'TOKEN - RefreshToken\\'').item.json[' accessToken'] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1424,
+        784
+      ],
+      "id": "306f6b8a-d2d2-4c87-be68-c819d4a85dbb",
+      "name": "get_serving_types"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "zd9IjMj7dG4LXkUj",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/zd9IjMj7dG4LXkUj",
+          "cachedResultName": "TOKEN - RefreshToken"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tokenType": "Bearer",
+            "refreshToken": "59746e81-ec77-4cf0-9182-921e3a3205c7",
+            "accessToken": "eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJrZWRpcmkudGVjaG5vcGFya0BnbWFpbC5jb20iLCJ1c2VySWQiOiI3MGQzMWJjNi0zYjE4LTQ0MDctYWVlNi1mZWMyYTg2ODI5MTEiLCJlbWFpbCI6ImtlZGlyaS50ZWNobm9wYXJrQGdtYWlsLmNvbSIsInJvbGUiOiJTaXN0ZW0gQWRtaW5pc3RyYXRvciIsImlhdCI6MTc2NzA3NDcxMiwiZXhwIjoxNzY3MTYxMTEyfQ.xhSEqjWbw2wBELEhmqKnlcHe4qF5HvmWZ_3xb-totJ7fkLZypHDkC6D1ddZApX4tOcZH8HpH2ns5NIBbgf6ugA"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "tokenType",
+              "displayName": "tokenType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "accessToken",
+              "displayName": "accessToken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "refreshToken",
+              "displayName": "refreshToken",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        464
+      ],
+      "id": "eadb8f58-cd5c-416f-b342-aa55f61f79e1",
+      "name": "Call 'TOKEN - RefreshToken'"
+    },
+    {
+      "parameters": {
+        "toolDescription": "=Gunakan tool ini untuk mengambil daftar stok dari database.\n\nWAJIB panggil tool ini ketika:\n- Customer bertanya tentang stock\n- Customer ingin memesan produk\n- Sebelum memberikan informasi stock",
+        "method": "=GET",
+        "url": "=https://demo-kedaimaster-api.lab.kediritechnopark.com/api/v1/materials",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Call \\'TOKEN - RefreshToken\\'').item.json[' accessToken'] }}"
+            }
+          ]
+        },
+        "options": {},
+        "optimizeResponse": true,
+        "fieldsToInclude": "selected",
+        "fields": "=id,name,uom.id,uom.name,stock"
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1584,
+        832
+      ],
+      "id": "32657ccd-56ac-4e9d-82e1-7aa64749bdb7",
+      "name": "get_material"
+    },
+    {
+      "parameters": {
+        "operation": "fetch-instances",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instane || 'kediritechnopark' }}"
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2224,
+        432
+      ],
+      "id": "e6746e75-09ca-41c4-a1e4-141a329e00e2",
+      "name": "Fetch instance",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "=Gunakan tool ini untuk mengambil daftar menu dan harga produk dari database.\n\nWAJIB panggil tool ini ketika:\n- Customer bertanya tentang menu\n- Customer bertanya tentang harga  \n- Customer ingin memesan produk\n- Sebelum memberikan informasi harga apapun\n\nHasil akan berisi: id, name, stock, price, category produk.\nGUNAKAN HARGA DARI HASIL INI - jangan mengarang!",
+        "method": "=GET",
+        "url": "=https://demo-kedaimaster-api.lab.kediritechnopark.com/api/v1/products",
+        "options": {},
+        "optimizeResponse": true,
+        "fieldsToInclude": "selected",
+        "fields": "=id,name,category.id,category.name,price.id,price.unitPrice,materialId,visible"
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1552,
+        672
+      ],
+      "id": "9107269b-d11a-4398-beb1-d03ae11e57dd",
+      "name": "get_product"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "messageText": "={{ $('Type_Condition').item.json.message || $('Action_Condition1').item.json.message || \"\" }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2192,
+        192
+      ],
+      "id": "281a2b6e-79a3-45d3-a5e3-4de137c4a3de",
+      "name": "Send text",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "send-presence",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "delay": 3500
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        192
+      ],
+      "id": "fa2329ce-716a-4320-a28a-5a47cb7cca53",
+      "name": "Send Typing",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "send-presence",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "delay": 3500
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2816,
+        496
+      ],
+      "id": "bcd111ab-1cc9-4921-af6d-98043b06354b",
+      "name": "Send Typing1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "send-presence",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "delay": 3500
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2608,
+        800
+      ],
+      "id": "70caa4d0-ab0e-4303-9fe8-c43771c92e83",
+      "name": "Send Typing2",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "read-messages",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "messageId": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.id }}"
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        192
+      ],
+      "id": "6f496d70-3332-4b5b-bf84-1f63d9962333",
+      "name": "Read Message",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "read-messages",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "messageId": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.id }}"
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2656,
+        496
+      ],
+      "id": "fcb7af33-2217-467d-9a8c-373b79e3afa2",
+      "name": "Read Message1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat-api",
+        "operation": "read-messages",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "messageId": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.id }}"
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2464,
+        800
+      ],
+      "id": "ebfbfc5e-22bd-4e4d-a8d3-e01659e2a2b1",
+      "name": "Read Message2",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "instanceName": "={{ $('Input StoreId dan Pesan User').item.json.body.instance }}",
+        "remoteJid": "={{ $('Input StoreId dan Pesan User').item.json.body.data.key.remoteJidAlt }}",
+        "messageText": "={{ $('Action_Condition').item.json.message }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api-english.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        2960,
+        496
+      ],
+      "id": "6b2ff89b-7ec3-4c18-994a-f611ef639cc8",
+      "name": "Send text1",
+      "credentials": {
+        "evolutionApi": {
+          "id": "QfpiErMTxR5g3kIt",
+          "name": "Kediritechnopark"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://demo-kedaimaster-api.lab.kediritechnopark.com/api/v1/transactions/paid",
+        "options": {},
+        "optimizeResponse": true,
+        "fieldsToInclude": "selected",
+        "fields": "=id,refNo,paymentType,servingType,paid,total,transactionDetails"
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        1264,
+        848
+      ],
+      "id": "27620eb6-becf-47b1-aca4-8e8afe240474",
+      "name": "get_recommendation"
+    }
+  ],
+  "connections": {
+    "Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structure & Parsed": {
+      "main": [
+        [
+          {
+            "node": "Type_Condition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input StoreId dan Pesan User": {
+      "main": [
+        [
+          {
+            "node": "Call 'TOKEN - RefreshToken'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FILTER AGENT": {
+      "main": [
+        [
+          {
+            "node": "Structure & Parsed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Type_Condition": {
+      "main": [
+        [
+          {
+            "node": "Read Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Action_Condition1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Action_Condition",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action_Condition": {
+      "main": [
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch instance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST_Transaksi": {
+      "main": [
+        [
+          {
+            "node": "Read Message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action_Condition1": {
+      "main": [
+        [
+          {
+            "node": "Read Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Input": {
+      "main": [
+        [
+          {
+            "node": "Call 'speech-to-text'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'speech-to-text'": {
+      "main": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_serving_types": {
+      "ai_tool": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'TOKEN - RefreshToken'": {
+      "main": [
+        [
+          {
+            "node": "Filter Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_material": {
+      "ai_tool": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch instance": {
+      "main": [
+        [
+          {
+            "node": "POST_Transaksi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_product": {
+      "ai_tool": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Typing": {
+      "main": [
+        [
+          {
+            "node": "Send text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Typing1": {
+      "main": [
+        [
+          {
+            "node": "Send text1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Typing2": {
+      "main": [
+        [
+          {
+            "node": "Send text2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Message": {
+      "main": [
+        [
+          {
+            "node": "Send Typing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Message1": {
+      "main": [
+        [
+          {
+            "node": "Send Typing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Message2": {
+      "main": [
+        [
+          {
+            "node": "Send Typing2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_recommendation": {
+      "ai_tool": [
+        [
+          {
+            "node": "FILTER AGENT",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Input StoreId dan Pesan User": [
+      {
+        "headers": {
+          "host": "auto.apps.kediritechnopark.com",
+          "x-real-ip": "128.199.176.167",
+          "x-real-port": "37956",
+          "x-forwarded-for": "128.199.176.167",
+          "remote-host": "128.199.176.167",
+          "connection": "upgrade",
+          "content-length": "1438",
+          "accept": "application/json, text/plain, */*",
+          "content-type": "application/json",
+          "user-agent": "axios/1.12.2",
+          "accept-encoding": "gzip, compress, deflate, br"
+        },
+        "params": {},
+        "query": {},
+        "body": {
+          "event": "messages.upsert",
+          "instance": "kediritechnopark",
+          "data": {
+            "key": {
+              "remoteJid": "17098415816810@lid",
+              "remoteJidAlt": "6282139695033@s.whatsapp.net",
+              "fromMe": false,
+              "id": "ACE04FCD82A4C0B006832C938CF6776C",
+              "participant": "",
+              "addressingMode": "lid"
+            },
+            "pushName": "Hanns",
+            "status": "DELIVERY_ACK",
+            "message": {
+              "conversation": "Lihat menunya donk kaka",
+              "messageContextInfo": {
+                "deviceListMetadata": {
+                  "senderKeyIndexes": [],
+                  "recipientKeyIndexes": [],
+                  "senderKeyHash": {
+                    "0": 242,
+                    "1": 79,
+                    "2": 96,
+                    "3": 195,
+                    "4": 187,
+                    "5": 37,
+                    "6": 238,
+                    "7": 220,
+                    "8": 53,
+                    "9": 32
+                  },
+                  "senderTimestamp": {
+                    "low": 1767000390,
+                    "high": 0,
+                    "unsigned": true
+                  },
+                  "recipientKeyHash": {
+                    "0": 128,
+                    "1": 178,
+                    "2": 107,
+                    "3": 210,
+                    "4": 105,
+                    "5": 134,
+                    "6": 129,
+                    "7": 196,
+                    "8": 14,
+                    "9": 141
+                  },
+                  "recipientTimestamp": {
+                    "low": 1766921994,
+                    "high": 0,
+                    "unsigned": true
+                  }
+                },
+                "deviceListMetadataVersion": 2,
+                "messageSecret": {
+                  "0": 147,
+                  "1": 40,
+                  "2": 233,
+                  "3": 10,
+                  "4": 182,
+                  "5": 173,
+                  "6": 224,
+                  "7": 221,
+                  "8": 134,
+                  "9": 246,
+                  "10": 51,
+                  "11": 172,
+                  "12": 15,
+                  "13": 79,
+                  "14": 140,
+                  "15": 92,
+                  "16": 207,
+                  "17": 172,
+                  "18": 73,
+                  "19": 56,
+                  "20": 29,
+                  "21": 90,
+                  "22": 111,
+                  "23": 3,
+                  "24": 44,
+                  "25": 132,
+                  "26": 218,
+                  "27": 201,
+                  "28": 82,
+                  "29": 1,
+                  "30": 196,
+                  "31": 9
+                }
+              }
+            },
+            "messageType": "conversation",
+            "messageTimestamp": 1767075509,
+            "instanceId": "5b49519c-bf11-40cc-93f0-6d3061506acf",
+            "source": "android"
+          },
+          "destination": "https://auto.apps.kediritechnopark.com/webhook/api/v1/wa/chatbot",
+          "date_time": "2025-12-30T03:18:29.169Z",
+          "sender": "628812125819@s.whatsapp.net",
+          "server_url": "http://localhost:8080",
+          "apikey": "15745C4D518C-4C8A-A6AF-5EB9C05A9ED4"
+        },
+        "webhookUrl": "https://auto.apps.kediritechnopark.com/webhook/api/v1/wa/chatbot",
+        "executionMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "357c6c89bb2d640fc4e7fac2b1104ade5e66e91755aea9d1bebed719a856003b"
+  }
+}
